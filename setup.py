@@ -38,7 +38,7 @@ setup(
         "Programming Language :: Python :: 3 :: Only",
         "Operating System :: OS Independent",
     ],
-    keywords="ai, agents, autonomous, reasoning, lightweight",
+    keywords="ai, agents, autonomous, reasoning, lightweight, mcp, rag, vector-search",
     packages=find_packages(exclude=["tests", "tests.*", "examples", "examples.*"]),
     python_requires=">=3.10, <4",
     install_requires=[
@@ -54,11 +54,14 @@ setup(
         "fastapi>=0.100.0",
         "uvicorn>=0.23.0",
         "aiohttp>=3.9.0",
+        # WebSocket support
+        "websockets>=12.0",
         # Search and web scraping
         "beautifulsoup4>=4.12.0",
         "duckduckgo-search>=6.1.0",
         # Data processing
         "pandas>=2.0.0",
+        "numpy>=1.24.0",
         # Authentication
         "PyJWT>=2.8.0",
         "passlib>=1.7.4",
@@ -81,6 +84,49 @@ setup(
             "sphinx>=7.2.0",
             "sphinx-rtd-theme>=2.0.0",
             "myst-parser>=2.0.0",
+        ],
+        "vector": [
+            # Vector database support
+            "qdrant-client>=1.7.0",
+            # Embedding models
+            "openai>=1.0.0",  # For OpenAI embeddings
+            "cohere>=4.0.0",  # For Cohere embeddings
+            "sentence-transformers>=2.2.0",  # For local embeddings
+        ],
+        "mcp": [
+            # MCP protocol support
+            "jsonschema>=4.20.0",
+            "httpx>=0.25.0",
+        ],
+        "advanced": [
+            # Advanced agent architectures
+            "networkx>=3.0",  # For graph-based reasoning
+            "scikit-learn>=1.3.0",  # For ML utilities
+            # Observability
+            "opentelemetry-api>=1.20.0",
+            "opentelemetry-sdk>=1.20.0",
+            "opentelemetry-instrumentation-fastapi>=0.41b0",
+            # Additional LLM providers
+            "anthropic>=0.7.0",
+            "google-generativeai>=0.3.0",
+            "mistralai>=0.0.8",
+        ],
+        "all": [
+            # Include all optional dependencies
+            "qdrant-client>=1.7.0",
+            "openai>=1.0.0",
+            "cohere>=4.0.0",
+            "sentence-transformers>=2.2.0",
+            "jsonschema>=4.20.0",
+            "httpx>=0.25.0",
+            "networkx>=3.0",
+            "scikit-learn>=1.3.0",
+            "opentelemetry-api>=1.20.0",
+            "opentelemetry-sdk>=1.20.0",
+            "opentelemetry-instrumentation-fastapi>=0.41b0",
+            "anthropic>=0.7.0",
+            "google-generativeai>=0.3.0",
+            "mistralai>=0.0.8",
         ],
     },
     entry_points={
