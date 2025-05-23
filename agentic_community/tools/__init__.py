@@ -3,5 +3,20 @@
 from .search_tool import SearchTool
 from .calculator_tool import CalculatorTool
 from .text_tool import TextTool
+from .file_tools import FileReadTool, FileWriteTool, FileDeleteTool, FileListTool
+from .data_tools import CSVTool, JSONTool, DataFrameTool
+from .web_scraper import WebScraperTool
 
-__all__ = ["SearchTool", "CalculatorTool", "TextTool"]
+__all__ = [
+    "SearchTool",
+    "CalculatorTool", 
+    "TextTool",
+    "FileReadTool",
+    "FileWriteTool",
+    "FileDeleteTool",
+    "FileListTool",
+    "CSVTool",
+    "JSONTool",
+    "DataFrameTool",
+    "WebScraperTool"
+]
