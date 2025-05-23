@@ -54,6 +54,8 @@ setup(
         "fastapi>=0.100.0",
         "uvicorn>=0.23.0",
         "aiohttp>=3.9.0",
+        # Search functionality
+        "beautifulsoup4>=4.12.0",
     ],
     extras_require={
         "dev": [
