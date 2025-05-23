@@ -64,7 +64,7 @@ def test_licensing():
     """Test that licensing works correctly for community edition."""
     print("\nTesting licensing...")
     try:
-        from agentic_community.core.licensing import LicenseManager, Feature
+        from agentic_community.core.licensing.manager import LicenseManager, Feature
         
         # Community edition should have basic features
         has_basic = LicenseManager.has_feature(Feature.BASIC_AGENTS)
