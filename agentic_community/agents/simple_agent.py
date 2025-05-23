@@ -6,7 +6,7 @@ A lightweight agent implementation without external dependencies.
 from typing import Any, Dict, List, Optional
 from agentic_community.core.base import BaseAgent
 from agentic_community.core.utils import get_logger
-from agentic_community.core.reasoning import ReasoningEngine
+from agentic_community.core.reasoning.basic_reasoning import ReasoningEngine
 
 logger = get_logger(__name__)
 
