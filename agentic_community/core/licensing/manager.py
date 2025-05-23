@@ -207,3 +207,7 @@ def get_license_manager() -> LicenseManager:
     if _license_manager is None:
         _license_manager = LicenseManager()
     return _license_manager
+
+
+# For backward compatibility - static access
+LicenseManager.check_feature = lambda feature: get_license_manager().check_feature(feature)
