@@ -10,4 +10,12 @@ except ImportError as e:
     warnings.warn(f"Failed to import SimpleAgent with LangChain: {e}. Using mock version.")
     from .simple_agent_mock import SimpleAgent
 
-__all__ = ['SimpleAgent']
+# Import ReAct agent
+from .react_agent import ReActAgent, ReActAgentWithMemory, create_react_agent
+
+__all__ = [
+    'SimpleAgent',
+    'ReActAgent',
+    'ReActAgentWithMemory',
+    'create_react_agent'
+]
