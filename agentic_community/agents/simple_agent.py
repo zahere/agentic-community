@@ -6,7 +6,17 @@ Licensed under Apache License 2.0
 
 from typing import Any, Dict, List, Optional
 from langchain_core.language_models import BaseLanguageModel
-from langchain_community.llms import OpenAI
+try:
+    # Try newer import structure
+    from langchain_openai import OpenAI
+except ImportError:
+    # Fall back to older structure
+    try:
+        from langchain_community.llms import OpenAI
+    except ImportError:
+        # Last resort - try direct langchain import
+        from langchain.llms import OpenAI
+        
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
 
@@ -46,7 +56,11 @@ class SimpleAgent(BaseAgent):
     def _initialize_llm(self) -> BaseLanguageModel:
         """Initialize OpenAI LLM for community edition."""
         if not self.openai_api_key:
-            raise ValueError("OpenAI API key required for community edition")
+            import os
+            # Try to get from environment
+            self.openai_api_key = os.getenv("OPENAI_API_KEY")
+            if not self.openai_api_key:
+                raise ValueError("OpenAI API key required for community edition. Set OPENAI_API_KEY environment variable.")
             
         return OpenAI(
             temperature=self.config.temperature,
