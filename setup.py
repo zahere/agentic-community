@@ -54,8 +54,17 @@ setup(
         "fastapi>=0.100.0",
         "uvicorn>=0.23.0",
         "aiohttp>=3.9.0",
-        # Search functionality
+        # Search and web scraping
         "beautifulsoup4>=4.12.0",
+        "duckduckgo-search>=6.1.0",
+        # Data processing
+        "pandas>=2.0.0",
+        # Authentication
+        "PyJWT>=2.8.0",
+        "passlib>=1.7.4",
+        "python-multipart>=0.0.9",
+        # Performance monitoring
+        "psutil>=5.9.0",
     ],
     extras_require={
         "dev": [
