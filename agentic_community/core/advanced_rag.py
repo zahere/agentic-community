@@ -1,315 +1,628 @@
 """
-Advanced RAG (Retrieval-Augmented Generation) techniques.
+Advanced RAG (Retrieval-Augmented Generation) Techniques
 
-Implements state-of-the-art RAG strategies including:
+This module implements state-of-the-art RAG techniques including:
 - HyDE (Hypothetical Document Embeddings)
-- Multi-Query Generation
-- Hybrid Search (Vector + Keyword)
-- Re-ranking Strategies
+- Multi-Query Retrieval
+- Contextual Compression
+- Fusion Retrieval
+- Recursive Retrieval
 """
 
 import asyncio
-from typing import List, Dict, Any, Optional, Callable, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
-from abc import ABC, abstractmethod
-import logging
+from enum import Enum
+import numpy as np
+from collections import defaultdict
 
-from ..core.vector_store import VectorStore, Document, SearchResult
-from ..core.llm_providers import LLMRouter, LLMConfig
+from agentic_community.core.vector_store import VectorStore
+from agentic_community.core.llm_providers import create_llm_client, LLMResponse
+from agentic_community.core.cache import cache_result
+from agentic_community.core.exceptions import RAGError
+from agentic_community.core.validation import validate_input
 
-logger = logging.getLogger(__name__)
+
+class RAGStrategy(Enum):
+    """Available RAG strategies"""
+    STANDARD = "standard"
+    HYDE = "hyde"
+    MULTI_QUERY = "multi_query"
+    CONTEXTUAL_COMPRESSION = "contextual_compression"
+    FUSION = "fusion"
+    RECURSIVE = "recursive"
+    HIERARCHICAL = "hierarchical"
+
+
+@dataclass
+class Document:
+    """Represents a document in the RAG system"""
+    id: str
+    content: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    embedding: Optional[List[float]] = None
+    score: float = 0.0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "content": self.content,
+            "metadata": self.metadata,
+            "score": self.score
+        }
 
 
 @dataclass
 class RAGConfig:
-    """Configuration for RAG strategies."""
-    chunk_size: int = 500
+    """Configuration for RAG operations"""
+    strategy: RAGStrategy = RAGStrategy.STANDARD
+    vector_store: Optional[VectorStore] = None
+    llm_provider: str = "openai"
+    llm_model: Optional[str] = None
+    embedding_model: str = "text-embedding-ada-002"
+    chunk_size: int = 512
     chunk_overlap: int = 50
     top_k: int = 5
     rerank_top_k: int = 3
-    use_hyde: bool = True
-    use_multi_query: bool = True
-    use_hybrid_search: bool = True
-    hyde_temperature: float = 0.7
-    multi_query_count: int = 3
-    relevance_threshold: float = 0.7
+    temperature: float = 0.7
+    use_cache: bool = True
+    cache_ttl: int = 3600
 
 
-@dataclass
-class QueryResult:
-    """Enhanced query result with metadata."""
-    original_query: str
-    expanded_queries: List[str] = field(default_factory=list)
-    hypothetical_answer: Optional[str] = None
-    retrieved_documents: List[Document] = field(default_factory=list)
-    reranked_documents: List[Document] = field(default_factory=list)
-    final_context: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-class HyDEStrategy:
+class AdvancedRAG:
     """
-    Hypothetical Document Embeddings (HyDE) strategy.
-    
-    Generates a hypothetical answer to the query and uses it
-    for more effective semantic search.
+    Advanced RAG implementation with multiple retrieval strategies
     """
     
-    def __init__(
-        self, 
-        llm_router: LLMRouter,
-        embedding_function: Callable[[str], List[float]]
-    ):
-        self.llm_router = llm_router
-        self.embed = embedding_function
-        
-    async def generate_hypothetical_answer(self, query: str) -> str:
-        """Generate a hypothetical answer for the query."""
-        prompt = f"""Generate a comprehensive, factual answer to this question. 
-Even if you're not certain, provide a detailed response that would likely contain the correct information.
-
-Question: {query}
-
-Detailed Answer:"""
-        
-        response = await self.llm_router.complete(prompt, temperature=0.7)
-        return response.content
-
-
-class MultiQueryStrategy:
-    """
-    Multi-Query Generation strategy.
-    
-    Generates multiple variations of the query to improve recall.
-    """
-    
-    def __init__(
-        self,
-        llm_router: LLMRouter,
-        num_queries: int = 3
-    ):
-        self.llm_router = llm_router
-        self.num_queries = num_queries
-        
-    async def generate_queries(self, original_query: str) -> List[str]:
-        """Generate multiple query variations."""
-        prompt = f"""Generate {self.num_queries} different variations of this question.
-Make them diverse but semantically similar.
-
-Original: {original_query}
-
-Variations:
-1."""
-        
-        response = await self.llm_router.complete(prompt)
-        
-        # Parse the response
-        lines = response.content.strip().split('\n')
-        queries = [original_query]  # Include original
-        
-        for line in lines:
-            line = line.strip()
-            if line and line[0].isdigit() and '.' in line:
-                query = line.split('.', 1)[1].strip()
-                if query:
-                    queries.append(query)
-                    
-        return queries[:self.num_queries + 1]
-
-
-class HybridSearchStrategy:
-    """
-    Hybrid search combining vector similarity and keyword matching.
-    """
-    
-    def __init__(
-        self,
-        keyword_weight: float = 0.3,
-        vector_weight: float = 0.7
-    ):
-        self.keyword_weight = keyword_weight
-        self.vector_weight = vector_weight
-        
-    def keyword_score(self, query: str, document: str) -> float:
-        """Calculate keyword-based relevance score."""
-        query_tokens = set(query.lower().split())
-        doc_tokens = set(document.lower().split())
-        
-        if not query_tokens:
-            return 0.0
-            
-        # Jaccard similarity
-        intersection = query_tokens.intersection(doc_tokens)
-        union = query_tokens.union(doc_tokens)
-        
-        return len(intersection) / len(union) if union else 0.0
-        
-    def apply_hybrid_scoring(self, query: str, documents: List[Document]) -> List[Document]:
-        """Apply hybrid scoring to documents."""
-        for doc in documents:
-            keyword_score = self.keyword_score(query, doc.content)
-            vector_score = doc.metadata.get("vector_score", 0.5)
-            
-            combined_score = (
-                self.vector_weight * vector_score +
-                self.keyword_weight * keyword_score
-            )
-            
-            doc.metadata["hybrid_score"] = combined_score
-            doc.metadata["keyword_score"] = keyword_score
-            
-        # Re-sort by hybrid score
-        documents.sort(
-            key=lambda d: d.metadata.get("hybrid_score", 0),
-            reverse=True
+    def __init__(self, config: RAGConfig):
+        self.config = config
+        self.vector_store = config.vector_store or VectorStore()
+        self.llm_client = create_llm_client(
+            config.llm_provider,
+            model=config.llm_model
         )
         
-        return documents
-
-
-class CrossEncoderReranker:
-    """
-    Re-ranking strategy using LLM-based scoring.
-    """
+        # Strategy implementations
+        self.strategies = {
+            RAGStrategy.STANDARD: self._standard_rag,
+            RAGStrategy.HYDE: self._hyde_rag,
+            RAGStrategy.MULTI_QUERY: self._multi_query_rag,
+            RAGStrategy.CONTEXTUAL_COMPRESSION: self._contextual_compression_rag,
+            RAGStrategy.FUSION: self._fusion_rag,
+            RAGStrategy.RECURSIVE: self._recursive_rag,
+            RAGStrategy.HIERARCHICAL: self._hierarchical_rag
+        }
     
-    def __init__(
+    async def query(
         self,
-        llm_router: LLMRouter,
-        top_k: int = 3
-    ):
-        self.llm_router = llm_router
-        self.top_k = top_k
+        query: str,
+        strategy: Optional[RAGStrategy] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Execute a RAG query with specified strategy
         
-    async def score_relevance(self, query: str, document: str) -> float:
-        """Score the relevance of a document to a query."""
-        prompt = f"""Rate relevance (0-10): Query: {query}
-Document: {document[:300]}...
-Score:"""
-        
-        response = await self.llm_router.complete(prompt, max_tokens=10)
-        
-        try:
-            score = float(response.content.strip())
-            return min(max(score / 10.0, 0.0), 1.0)
-        except:
-            return 0.5
+        Args:
+            query: The user query
+            strategy: RAG strategy to use (defaults to config)
+            **kwargs: Additional strategy-specific parameters
             
-    async def rerank(self, query: str, documents: List[Document]) -> List[Document]:
-        """Re-rank documents based on relevance scores."""
-        scores = await asyncio.gather(*[
-            self.score_relevance(query, doc.content)
-            for doc in documents
-        ])
+        Returns:
+            Dictionary containing answer and supporting documents
+        """
+        strategy = strategy or self.config.strategy
         
-        for doc, score in zip(documents, scores):
-            doc.metadata["rerank_score"] = score
-            
-        documents.sort(
-            key=lambda d: d.metadata.get("rerank_score", 0),
-            reverse=True
+        if strategy not in self.strategies:
+            raise RAGError(f"Unknown strategy: {strategy}")
+        
+        # Execute the appropriate strategy
+        return await self.strategies[strategy](query, **kwargs)
+    
+    async def _standard_rag(self, query: str, **kwargs) -> Dict[str, Any]:
+        """Standard RAG: Simple retrieval and generation"""
+        # Retrieve relevant documents
+        documents = await self._retrieve_documents(query, self.config.top_k)
+        
+        # Generate answer using retrieved context
+        answer = await self._generate_answer(query, documents)
+        
+        return {
+            "answer": answer,
+            "documents": [doc.to_dict() for doc in documents],
+            "strategy": "standard"
+        }
+    
+    async def _hyde_rag(self, query: str, **kwargs) -> Dict[str, Any]:
+        """
+        HyDE (Hypothetical Document Embeddings) RAG
+        
+        1. Generate a hypothetical answer
+        2. Use the hypothetical answer for retrieval
+        3. Generate final answer with retrieved documents
+        """
+        # Step 1: Generate hypothetical answer
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant. Answer the question as if you had perfect knowledge."},
+            {"role": "user", "content": query}
+        ]
+        
+        hypothetical_response = await self.llm_client.complete(
+            messages,
+            temperature=0.7,
+            max_tokens=300
         )
         
-        return documents[:self.top_k]
-
-
-class AdvancedRAGEngine:
-    """
-    Advanced RAG engine combining multiple strategies.
-    """
+        hypothetical_answer = hypothetical_response.content
+        
+        # Step 2: Retrieve using hypothetical answer
+        documents = await self._retrieve_documents(
+            hypothetical_answer,
+            self.config.top_k * 2  # Get more documents for HyDE
+        )
+        
+        # Step 3: Re-rank based on original query
+        reranked_docs = await self._rerank_documents(query, documents)
+        
+        # Step 4: Generate final answer
+        answer = await self._generate_answer(
+            query,
+            reranked_docs[:self.config.rerank_top_k]
+        )
+        
+        return {
+            "answer": answer,
+            "documents": [doc.to_dict() for doc in reranked_docs[:self.config.rerank_top_k]],
+            "strategy": "hyde",
+            "hypothetical_answer": hypothetical_answer
+        }
     
-    def __init__(
-        self,
-        vector_store: VectorStore,
-        llm_router: LLMRouter,
-        embedding_function: Callable[[str], List[float]],
-        config: Optional[RAGConfig] = None
-    ):
-        self.vector_store = vector_store
-        self.llm_router = llm_router
-        self.embed = embedding_function
-        self.config = config or RAGConfig()
-        
-        # Initialize strategies
-        self.hyde = HyDEStrategy(llm_router, embedding_function)
-        self.multi_query = MultiQueryStrategy(llm_router, config.multi_query_count)
-        self.hybrid_search = HybridSearchStrategy()
-        self.reranker = CrossEncoderReranker(llm_router, config.rerank_top_k)
-        
-    async def retrieve(self, query: str) -> QueryResult:
+    async def _multi_query_rag(self, query: str, **kwargs) -> Dict[str, Any]:
         """
-        Perform advanced retrieval using multiple strategies.
-        """
-        result = QueryResult(original_query=query)
+        Multi-Query RAG
         
-        # Step 1: Multi-query generation
-        if self.config.use_multi_query:
-            result.expanded_queries = await self.multi_query.generate_queries(query)
-        else:
-            result.expanded_queries = [query]
-            
-        # Step 2: HyDE generation
-        if self.config.use_hyde:
-            result.hypothetical_answer = await self.hyde.generate_hypothetical_answer(query)
-            
-        # Step 3: Retrieve documents
+        1. Generate multiple related queries
+        2. Retrieve documents for each query
+        3. Combine and deduplicate results
+        4. Generate answer from combined context
+        """
+        # Step 1: Generate multiple queries
+        messages = [
+            {"role": "system", "content": "Generate 3 different versions of the following question that capture different aspects or phrasings. Return only the questions, one per line."},
+            {"role": "user", "content": query}
+        ]
+        
+        queries_response = await self.llm_client.complete(
+            messages,
+            temperature=0.8,
+            max_tokens=200
+        )
+        
+        queries = [query] + queries_response.content.strip().split('\n')
+        queries = [q.strip() for q in queries if q.strip()][:4]  # Max 4 queries
+        
+        # Step 2: Retrieve for each query
         all_documents = []
         seen_ids = set()
         
-        for expanded_query in result.expanded_queries:
-            # Use HyDE embedding if available
-            if result.hypothetical_answer and self.config.use_hyde:
-                search_embedding = self.embed(result.hypothetical_answer)
-            else:
-                search_embedding = self.embed(expanded_query)
-                
-            # Vector search
-            search_results = self.vector_store.search(
-                search_embedding,
-                k=self.config.top_k * 2
+        for q in queries:
+            docs = await self._retrieve_documents(q, self.config.top_k)
+            for doc in docs:
+                if doc.id not in seen_ids:
+                    seen_ids.add(doc.id)
+                    all_documents.append(doc)
+        
+        # Step 3: Re-rank combined results
+        reranked_docs = await self._rerank_documents(query, all_documents)
+        
+        # Step 4: Generate answer
+        answer = await self._generate_answer(
+            query,
+            reranked_docs[:self.config.rerank_top_k]
+        )
+        
+        return {
+            "answer": answer,
+            "documents": [doc.to_dict() for doc in reranked_docs[:self.config.rerank_top_k]],
+            "strategy": "multi_query",
+            "queries_used": queries
+        }
+    
+    async def _contextual_compression_rag(self, query: str, **kwargs) -> Dict[str, Any]:
+        """
+        Contextual Compression RAG
+        
+        1. Retrieve documents normally
+        2. Extract only relevant portions from each document
+        3. Generate answer from compressed context
+        """
+        # Step 1: Standard retrieval
+        documents = await self._retrieve_documents(query, self.config.top_k)
+        
+        # Step 2: Compress each document
+        compressed_docs = []
+        
+        for doc in documents:
+            messages = [
+                {"role": "system", "content": "Extract only the portions of the following text that are relevant to answering the question. If nothing is relevant, respond with 'NO_RELEVANT_CONTENT'."},
+                {"role": "user", "content": f"Question: {query}\n\nText: {doc.content}"}
+            ]
+            
+            compression_response = await self.llm_client.complete(
+                messages,
+                temperature=0.3,
+                max_tokens=300
             )
             
-            for sr in search_results:
-                if sr.document.id not in seen_ids:
-                    sr.document.metadata["vector_score"] = sr.score
-                    all_documents.append(sr.document)
-                    seen_ids.add(sr.document.id)
-                    
-        result.retrieved_documents = all_documents
-        
-        # Step 4: Hybrid search scoring
-        if self.config.use_hybrid_search and all_documents:
-            all_documents = self.hybrid_search.apply_hybrid_scoring(query, all_documents)
+            compressed_content = compression_response.content
             
-        # Step 5: Re-ranking
-        if all_documents:
-            result.reranked_documents = await self.reranker.rerank(query, all_documents)
-        else:
-            result.reranked_documents = []
-            
-        # Build final context
-        context_parts = []
-        for i, doc in enumerate(result.reranked_documents):
-            relevance = doc.metadata.get("rerank_score", 0)
-            context_parts.append(f"[Doc {i+1} - Score: {relevance:.2f}]\n{doc.content}")
-            
-        result.final_context = "\n\n".join(context_parts)
+            if compressed_content != "NO_RELEVANT_CONTENT":
+                compressed_doc = Document(
+                    id=doc.id,
+                    content=compressed_content,
+                    metadata={**doc.metadata, "original_length": len(doc.content)},
+                    score=doc.score
+                )
+                compressed_docs.append(compressed_doc)
         
-        return result
+        # Step 3: Generate answer from compressed context
+        answer = await self._generate_answer(query, compressed_docs)
         
-    async def query(self, query: str) -> str:
+        return {
+            "answer": answer,
+            "documents": [doc.to_dict() for doc in compressed_docs],
+            "strategy": "contextual_compression",
+            "compression_ratio": sum(len(d.content) for d in compressed_docs) / sum(len(d.content) for d in documents)
+        }
+    
+    async def _fusion_rag(self, query: str, **kwargs) -> Dict[str, Any]:
         """
-        Query the RAG system and generate an answer.
+        Fusion RAG - Combines multiple retrieval methods
+        
+        1. Perform keyword-based retrieval
+        2. Perform semantic retrieval
+        3. Perform HyDE retrieval
+        4. Fuse results with reciprocal rank fusion
+        5. Generate answer from fused results
         """
-        result = await self.retrieve(query)
+        retrieval_methods = []
         
-        prompt = f"""Answer based on the context provided.
-
-Context:
-{result.final_context}
-
-Question: {query}
-
-Answer:"""
+        # Method 1: Standard semantic retrieval
+        semantic_docs = await self._retrieve_documents(query, self.config.top_k)
+        retrieval_methods.append(("semantic", semantic_docs))
         
-        response = await self.llm_router.complete(prompt)
+        # Method 2: Keyword-based retrieval (simulated)
+        keyword_docs = await self._keyword_retrieve(query, self.config.top_k)
+        retrieval_methods.append(("keyword", keyword_docs))
+        
+        # Method 3: HyDE retrieval
+        messages = [
+            {"role": "system", "content": "Answer this question briefly:"},
+            {"role": "user", "content": query}
+        ]
+        hyde_response = await self.llm_client.complete(messages, temperature=0.7, max_tokens=150)
+        hyde_docs = await self._retrieve_documents(hyde_response.content, self.config.top_k)
+        retrieval_methods.append(("hyde", hyde_docs))
+        
+        # Reciprocal Rank Fusion
+        fused_docs = self._reciprocal_rank_fusion(retrieval_methods)
+        
+        # Generate answer
+        answer = await self._generate_answer(
+            query,
+            fused_docs[:self.config.rerank_top_k]
+        )
+        
+        return {
+            "answer": answer,
+            "documents": [doc.to_dict() for doc in fused_docs[:self.config.rerank_top_k]],
+            "strategy": "fusion",
+            "retrieval_methods": [method[0] for method in retrieval_methods]
+        }
+    
+    async def _recursive_rag(self, query: str, depth: int = 2, **kwargs) -> Dict[str, Any]:
+        """
+        Recursive RAG - Iteratively refines retrieval and answers
+        
+        1. Initial retrieval and answer generation
+        2. Identify gaps or unclear points in the answer
+        3. Generate follow-up queries for gaps
+        4. Retrieve additional information
+        5. Refine the answer
+        """
+        all_documents = []
+        iterations = []
+        
+        current_query = query
+        current_answer = ""
+        
+        for i in range(depth):
+            # Retrieve documents
+            docs = await self._retrieve_documents(current_query, self.config.top_k)
+            all_documents.extend(docs)
+            
+            # Generate answer
+            if i == 0:
+                current_answer = await self._generate_answer(current_query, docs)
+            else:
+                # Refine previous answer with new information
+                messages = [
+                    {"role": "system", "content": "Refine and expand the previous answer with the new information provided."},
+                    {"role": "user", "content": f"Original question: {query}\n\nPrevious answer: {current_answer}\n\nNew information: {self._format_documents(docs)}\n\nProvide an improved answer."}
+                ]
+                
+                refinement_response = await self.llm_client.complete(messages)
+                current_answer = refinement_response.content
+            
+            iterations.append({
+                "query": current_query,
+                "documents_retrieved": len(docs),
+                "answer_preview": current_answer[:200] + "..."
+            })
+            
+            # Check if we need more information
+            if i < depth - 1:
+                # Generate follow-up query
+                messages = [
+                    {"role": "system", "content": "Based on the answer provided, identify what additional information would make it more complete. Generate ONE specific follow-up question."},
+                    {"role": "user", "content": f"Question: {query}\n\nCurrent answer: {current_answer}\n\nWhat additional information is needed?"}
+                ]
+                
+                followup_response = await self.llm_client.complete(messages, temperature=0.8)
+                current_query = followup_response.content.strip()
+        
+        # Deduplicate documents
+        unique_docs = self._deduplicate_documents(all_documents)
+        
+        return {
+            "answer": current_answer,
+            "documents": [doc.to_dict() for doc in unique_docs[:self.config.top_k]],
+            "strategy": "recursive",
+            "iterations": iterations,
+            "total_documents": len(unique_docs)
+        }
+    
+    async def _hierarchical_rag(self, query: str, **kwargs) -> Dict[str, Any]:
+        """
+        Hierarchical RAG - Uses document summaries for initial retrieval
+        
+        1. Retrieve from document summaries
+        2. Retrieve full documents based on summary matches
+        3. Perform detailed retrieval within selected documents
+        4. Generate answer from hierarchical context
+        """
+        # This is a simplified version - in practice, you'd have pre-computed summaries
+        
+        # Step 1: Retrieve at document level (simulated with larger chunks)
+        coarse_docs = await self._retrieve_documents(query, self.config.top_k * 2)
+        
+        # Step 2: For each relevant document, retrieve finer chunks
+        fine_documents = []
+        
+        for doc in coarse_docs[:self.config.top_k]:
+            # Simulate retrieving smaller chunks from the same document
+            # In practice, this would query chunks with doc.id as a filter
+            chunks = await self._retrieve_document_chunks(doc.id, query, 3)
+            fine_documents.extend(chunks)
+        
+        # Step 3: Re-rank all fine-grained chunks
+        reranked_docs = await self._rerank_documents(query, fine_documents)
+        
+        # Step 4: Generate answer
+        answer = await self._generate_answer(
+            query,
+            reranked_docs[:self.config.rerank_top_k]
+        )
+        
+        return {
+            "answer": answer,
+            "documents": [doc.to_dict() for doc in reranked_docs[:self.config.rerank_top_k]],
+            "strategy": "hierarchical",
+            "coarse_documents": len(coarse_docs),
+            "fine_documents": len(fine_documents)
+        }
+    
+    # Helper methods
+    
+    @cache_result(ttl=3600)
+    async def _retrieve_documents(self, query: str, top_k: int) -> List[Document]:
+        """Retrieve documents from vector store"""
+        results = await self.vector_store.search(query, top_k)
+        
+        documents = []
+        for result in results:
+            doc = Document(
+                id=result.get("id", ""),
+                content=result.get("content", ""),
+                metadata=result.get("metadata", {}),
+                score=result.get("score", 0.0)
+            )
+            documents.append(doc)
+        
+        return documents
+    
+    async def _keyword_retrieve(self, query: str, top_k: int) -> List[Document]:
+        """Simulate keyword-based retrieval"""
+        # In practice, this would use BM25 or similar
+        # For now, we'll use the vector store with a modified query
+        keywords = query.lower().split()
+        keyword_query = " OR ".join(keywords)
+        return await self._retrieve_documents(keyword_query, top_k)
+    
+    async def _retrieve_document_chunks(
+        self,
+        doc_id: str,
+        query: str,
+        top_k: int
+    ) -> List[Document]:
+        """Retrieve chunks from a specific document"""
+        # In practice, this would filter by doc_id
+        # For now, simulate with regular retrieval
+        docs = await self._retrieve_documents(query, top_k)
+        # Add parent_doc_id to metadata
+        for doc in docs:
+            doc.metadata["parent_doc_id"] = doc_id
+        return docs
+    
+    async def _rerank_documents(
+        self,
+        query: str,
+        documents: List[Document]
+    ) -> List[Document]:
+        """Re-rank documents based on relevance to query"""
+        if not documents:
+            return []
+        
+        # Use LLM for re-ranking
+        reranked = []
+        
+        for doc in documents:
+            messages = [
+                {"role": "system", "content": "Rate the relevance of the following text to the question on a scale of 0-10. Respond with only a number."},
+                {"role": "user", "content": f"Question: {query}\n\nText: {doc.content[:500]}"}
+            ]
+            
+            score_response = await self.llm_client.complete(
+                messages,
+                temperature=0.1,
+                max_tokens=10
+            )
+            
+            try:
+                score = float(score_response.content.strip())
+                doc.score = score / 10.0
+            except:
+                doc.score = 0.5  # Default score if parsing fails
+            
+            reranked.append(doc)
+        
+        # Sort by score
+        reranked.sort(key=lambda x: x.score, reverse=True)
+        return reranked
+    
+    def _reciprocal_rank_fusion(
+        self,
+        retrieval_methods: List[Tuple[str, List[Document]]]
+    ) -> List[Document]:
+        """Perform reciprocal rank fusion on multiple retrieval results"""
+        k = 60  # Constant for RRF
+        doc_scores = defaultdict(float)
+        doc_objects = {}
+        
+        for method_name, documents in retrieval_methods:
+            for rank, doc in enumerate(documents):
+                # RRF formula
+                score = 1.0 / (k + rank + 1)
+                doc_scores[doc.id] += score
+                doc_objects[doc.id] = doc
+        
+        # Sort by fused score
+        sorted_ids = sorted(doc_scores.keys(), key=doc_scores.get, reverse=True)
+        
+        fused_documents = []
+        for doc_id in sorted_ids:
+            doc = doc_objects[doc_id]
+            doc.score = doc_scores[doc_id]
+            fused_documents.append(doc)
+        
+        return fused_documents
+    
+    def _deduplicate_documents(self, documents: List[Document]) -> List[Document]:
+        """Remove duplicate documents"""
+        seen_ids = set()
+        unique_docs = []
+        
+        for doc in documents:
+            if doc.id not in seen_ids:
+                seen_ids.add(doc.id)
+                unique_docs.append(doc)
+        
+        return unique_docs
+    
+    async def _generate_answer(
+        self,
+        query: str,
+        documents: List[Document]
+    ) -> str:
+        """Generate answer using retrieved documents"""
+        if not documents:
+            return "I couldn't find relevant information to answer your question."
+        
+        context = self._format_documents(documents)
+        
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant. Answer the question based on the provided context. If the context doesn't contain enough information, say so."},
+            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"}
+        ]
+        
+        response = await self.llm_client.complete(
+            messages,
+            temperature=self.config.temperature,
+            max_tokens=500
+        )
+        
         return response.content
+    
+    def _format_documents(self, documents: List[Document]) -> str:
+        """Format documents for inclusion in prompt"""
+        formatted = []
+        for i, doc in enumerate(documents):
+            formatted.append(f"[Document {i+1}]\n{doc.content}\n")
+        return "\n".join(formatted)
+
+
+# Convenience functions
+
+async def create_advanced_rag(
+    strategy: str = "standard",
+    vector_store: Optional[VectorStore] = None,
+    **kwargs
+) -> AdvancedRAG:
+    """
+    Create an Advanced RAG instance
+    
+    Example:
+        rag = await create_advanced_rag("hyde", llm_provider="openai")
+        result = await rag.query("What is quantum computing?")
+    """
+    config = RAGConfig(
+        strategy=RAGStrategy(strategy),
+        vector_store=vector_store,
+        **kwargs
+    )
+    
+    return AdvancedRAG(config)
+
+
+async def compare_rag_strategies(
+    query: str,
+    strategies: List[str],
+    vector_store: Optional[VectorStore] = None
+) -> Dict[str, Any]:
+    """
+    Compare multiple RAG strategies on the same query
+    
+    Returns comparative results and performance metrics
+    """
+    results = {}
+    
+    for strategy in strategies:
+        rag = await create_advanced_rag(strategy, vector_store)
+        start_time = asyncio.get_event_loop().time()
+        
+        try:
+            result = await rag.query(query)
+            end_time = asyncio.get_event_loop().time()
+            
+            results[strategy] = {
+                "answer": result["answer"],
+                "num_documents": len(result.get("documents", [])),
+                "execution_time": end_time - start_time,
+                "strategy_details": {k: v for k, v in result.items() if k not in ["answer", "documents"]}
+            }
+        except Exception as e:
+            results[strategy] = {
+                "error": str(e),
+                "execution_time": 0
+            }
+    
+    return results
