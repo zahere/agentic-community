@@ -214,5 +214,11 @@ def get_license_manager() -> LicenseManager:
     return _license_manager
 
 
-# For backward compatibility - add static method to class
-LicenseManager.check_feature = LicenseManager.check_feature_static
+# For backward compatibility with static calls
+# This allows LicenseManager.check_feature("feature_name") to work
+def _check_feature_classmethod(cls, feature: str) -> bool:
+    """Class method to check feature availability."""
+    return get_license_manager().check_feature(feature)
+
+# Add as class method
+LicenseManager.check_feature = classmethod(_check_feature_classmethod)
