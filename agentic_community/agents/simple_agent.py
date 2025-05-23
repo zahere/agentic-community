@@ -6,6 +6,16 @@ Licensed under Apache License 2.0
 
 from typing import Any, Dict, List, Optional
 from langchain_core.language_models import BaseLanguageModel
+
+# Import error handling and validation
+from agentic_community.core.exceptions import (
+    APIKeyError, AgentExecutionError, InvalidTaskError, 
+    ToolLimitExceeded, handle_error
+)
+from agentic_community.core.utils.validation import (
+    validate_agent_name, validate_task, validate_inputs
+)
+
 try:
     # Try newer import structure
     from langchain_openai import OpenAI
@@ -32,6 +42,9 @@ class SimpleAgent(BaseAgent):
     Community edition agent with limited capabilities.
     """
     
+    MAX_TOOLS = 3  # Community edition limit
+    
+    @validate_inputs(name=validate_agent_name)
     def __init__(self, name: str, tools: Optional[List[BaseTool]] = None, openai_api_key: Optional[str] = None):
         """
         Initialize simple agent.
@@ -53,11 +66,21 @@ class SimpleAgent(BaseAgent):
         
         # Add tools if provided
         if tools:
-            for tool in tools[:3]:  # Community edition limited to 3 tools
-                self.add_tool(tool)
+            for tool in tools[:self.MAX_TOOLS]:
+                try:
+                    self.add_tool(tool)
+                except ToolLimitExceeded:
+                    logger.warning(f"Tool limit reached. Only first {self.MAX_TOOLS} tools added.")
+                    break
         
         # Initialize the graph
         self._setup_graph()
+        
+    def add_tool(self, tool: BaseTool) -> None:
+        """Add a tool with validation."""
+        if len(self.tools) >= self.MAX_TOOLS:
+            raise ToolLimitExceeded(self.MAX_TOOLS, "community")
+        super().add_tool(tool)
         
     def _initialize_llm(self) -> BaseLanguageModel:
         """Initialize OpenAI LLM for community edition."""
@@ -66,18 +89,22 @@ class SimpleAgent(BaseAgent):
             # Try to get from environment
             self.openai_api_key = os.getenv("OPENAI_API_KEY")
             if not self.openai_api_key:
-                # Return a mock LLM for testing
+                # For testing/demo purposes, return a mock LLM
                 logger.warning("No OpenAI API key found. Using mock LLM for testing.")
                 from unittest.mock import MagicMock
                 mock_llm = MagicMock()
-                mock_llm.invoke = lambda x: "Step 1: Analyze\nStep 2: Plan\nStep 3: Execute"
+                mock_llm.invoke = lambda x: MagicMock(content="Step 1: Analyze\nStep 2: Plan\nStep 3: Execute")
                 return mock_llm
-            
-        return OpenAI(
-            temperature=self.config.temperature,
-            openai_api_key=self.openai_api_key
-        )
         
+        try:
+            return OpenAI(
+                temperature=self.config.temperature,
+                openai_api_key=self.openai_api_key
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI LLM: {e}")
+            raise APIKeyError("OpenAI")
+            
     def _setup_graph(self) -> None:
         """Setup the simple reasoning graph."""
         # Define the graph state
@@ -88,6 +115,7 @@ class SimpleAgent(BaseAgent):
             thoughts: List[str]
             actions: List[Dict[str, Any]]
             final_answer: str
+            errors: List[str]
             
         # Create the graph
         workflow = StateGraph(GraphState)
@@ -109,6 +137,7 @@ class SimpleAgent(BaseAgent):
     def _think_node(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Basic thinking node - sequential reasoning only."""
         task = state["task"]
+        errors = state.get("errors", [])
         
         # Simple prompt for basic reasoning
         prompt = ChatPromptTemplate.from_template(
@@ -122,20 +151,25 @@ class SimpleAgent(BaseAgent):
             chain = prompt | self.llm
             response = chain.invoke({"task": task})
         except Exception as e:
-            logger.warning(f"LLM invocation failed: {e}. Using fallback response.")
-            response = "Step 1: Understand the task\nStep 2: Plan approach\nStep 3: Execute plan\nStep 4: Review results"
+            error_msg = f"LLM invocation failed: {str(e)}"
+            logger.warning(error_msg)
+            errors.append(error_msg)
+            response = MagicMock(content="Step 1: Understand the task\nStep 2: Plan approach\nStep 3: Execute plan\nStep 4: Review results")
         
         # Parse into thoughts
-        if isinstance(response, str):
-            thoughts = [step.strip() for step in response.split("\n") if step.strip()]
+        if hasattr(response, 'content'):
+            content = response.content
         else:
-            thoughts = ["Step 1: Process task", "Step 2: Execute", "Step 3: Complete"]
+            content = str(response)
+            
+        thoughts = [step.strip() for step in content.split("\n") if step.strip()]
         
-        return {"thoughts": thoughts[:5]}  # Limit to 5 steps
+        return {"thoughts": thoughts[:5], "errors": errors}  # Limit to 5 steps
         
     def _act_node(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Basic action node - execute simple actions."""
         thoughts = state["thoughts"]
+        errors = state.get("errors", [])
         actions = []
         
         for thought in thoughts:
@@ -145,32 +179,55 @@ class SimpleAgent(BaseAgent):
                 "tool": "basic_reasoning",
                 "result": f"Completed: {thought}"
             }
-            actions.append(action)
             
             # Use tools if available
             if self.tools:
-                # Simple tool execution (limited to 3 tools)
-                for tool in self.tools[:3]:  # Community limit
+                # Try to match thought with appropriate tool
+                for tool in self.tools:
                     try:
-                        result = tool.execute(thought)
-                        action["tool_result"] = result
-                    except Exception as e:
-                        logger.error(f"Tool execution failed: {e}")
+                        # Simple keyword matching for tool selection
+                        tool_keywords = {
+                            "search": ["search", "find", "look up", "research"],
+                            "calculator": ["calculate", "compute", "math", "sum", "multiply"],
+                            "text_processor": ["summarize", "extract", "format", "text"]
+                        }
                         
-        return {"actions": actions}
+                        thought_lower = thought.lower()
+                        if any(keyword in thought_lower for keyword in tool_keywords.get(tool.name, [])):
+                            result = tool.invoke(thought)
+                            action["tool"] = tool.name
+                            action["tool_result"] = result
+                            break
+                    except Exception as e:
+                        error_msg = f"Tool '{tool.name}' execution failed: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                        handle_error(e, f"tool execution for {tool.name}")
+                        
+            actions.append(action)
+                    
+        return {"actions": actions, "errors": errors}
         
     def _summarize_node(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Summarize the results."""
         actions = state["actions"]
+        errors = state.get("errors", [])
         
         # Create summary
         summary_parts = []
         for i, action in enumerate(actions, 1):
             summary_parts.append(f"{i}. {action['result']}")
-            
+            if "tool_result" in action:
+                summary_parts.append(f"   Tool output: {action['tool_result']}")
+                
         final_answer = "\n".join(summary_parts)
         
-        return {"final_answer": final_answer}
+        # Add error summary if any
+        if errors:
+            final_answer += "\n\nNote: Some errors occurred during execution:\n"
+            final_answer += "\n".join(f"- {error}" for error in errors)
+        
+        return {"final_answer": final_answer, "errors": errors}
         
     def think(self, task: str) -> Dict[str, Any]:
         """
@@ -182,21 +239,30 @@ class SimpleAgent(BaseAgent):
         Returns:
             Dictionary containing basic thoughts
         """
+        # Validate task
+        task = validate_task(task)
+        
         initial_state = {
             "task": task,
             "thoughts": [],
             "actions": [],
-            "final_answer": ""
+            "final_answer": "",
+            "errors": []
         }
         
-        # Run the graph
-        result = self.graph.invoke(initial_state)
-        
-        return {
-            "thoughts": result["thoughts"],
-            "reasoning_type": "sequential",
-            "complexity": "basic"
-        }
+        try:
+            # Run the graph
+            result = self.graph.invoke(initial_state)
+            
+            return {
+                "thoughts": result["thoughts"],
+                "reasoning_type": "sequential",
+                "complexity": "basic",
+                "errors": result.get("errors", [])
+            }
+        except Exception as e:
+            handle_error(e, "thinking process")
+            raise AgentExecutionError(self.config.name, task, str(e))
         
     def act(self, thoughts: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -211,9 +277,11 @@ class SimpleAgent(BaseAgent):
         # In simple agent, this is handled by the graph
         return {
             "actions_taken": len(thoughts.get("thoughts", [])),
-            "status": "completed"
+            "status": "completed",
+            "errors": thoughts.get("errors", [])
         }
         
+    @validate_inputs(task=validate_task)
     def run(self, task: str) -> str:
         """
         Run the complete agent workflow.
@@ -223,30 +291,41 @@ class SimpleAgent(BaseAgent):
             
         Returns:
             Final result as string
+            
+        Raises:
+            InvalidTaskError: If task is invalid
+            AgentExecutionError: If execution fails
         """
         logger.info(f"SimpleAgent {self.config.name} executing task: {task}")
         
-        # Update state
-        self.update_state({"current_task": task})
-        
-        # Run through graph
-        initial_state = {
-            "task": task,
-            "thoughts": [],
-            "actions": [],
-            "final_answer": ""
-        }
-        
-        result = self.graph.invoke(initial_state)
-        
-        # Add to history
-        self.state_manager.add_to_history(
-            self.config.name,
-            {
+        try:
+            # Update state
+            self.update_state({"current_task": task})
+            
+            # Run through graph
+            initial_state = {
                 "task": task,
-                "result": result["final_answer"],
-                "type": "simple_execution"
+                "thoughts": [],
+                "actions": [],
+                "final_answer": "",
+                "errors": []
             }
-        )
-        
-        return result["final_answer"]
+            
+            result = self.graph.invoke(initial_state)
+            
+            # Add to history
+            self.state_manager.add_to_history(
+                self.config.name,
+                {
+                    "task": task,
+                    "result": result["final_answer"],
+                    "type": "simple_execution",
+                    "errors": result.get("errors", [])
+                }
+            )
+            
+            return result["final_answer"]
+            
+        except Exception as e:
+            handle_error(e, f"agent execution for task: {task}")
+            raise AgentExecutionError(self.config.name, task, str(e))
