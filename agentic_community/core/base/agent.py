@@ -39,6 +39,9 @@ class BaseAgent(ABC):
         self.tools: List[Any] = []
         self.graph: Optional[StateGraph] = None
         
+        # Initialize state for this agent
+        self.state_manager.create_state(config.name)
+        
         logger.info(f"Initializing agent: {config.name}")
         
     def _initialize_llm(self) -> BaseLanguageModel:
@@ -109,8 +112,11 @@ class BaseAgent(ABC):
         
     def get_state(self) -> Dict[str, Any]:
         """Get current agent state."""
-        return self.state_manager.get_state()
+        state = self.state_manager.get_state(self.config.name)
+        if state:
+            return state.model_dump()
+        return {}
         
     def update_state(self, updates: Dict[str, Any]) -> None:
         """Update agent state."""
-        self.state_manager.update_state(updates)
+        self.state_manager.update_state(self.config.name, updates)
