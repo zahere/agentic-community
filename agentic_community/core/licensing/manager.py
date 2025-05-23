@@ -145,11 +145,6 @@ class LicenseManager:
                 
         logger.debug(f"Feature {feature} not available in {self.get_edition()} edition")
         return False
-    
-    @staticmethod
-    def check_feature_static(feature: str) -> bool:
-        """Static method to check feature availability."""
-        return get_license_manager().check_feature(feature)
         
     def get_limits(self) -> Dict[str, Any]:
         """Get current limits based on edition."""
@@ -212,13 +207,3 @@ def get_license_manager() -> LicenseManager:
     if _license_manager is None:
         _license_manager = LicenseManager()
     return _license_manager
-
-
-# For backward compatibility with static calls
-# This allows LicenseManager.check_feature("feature_name") to work
-def _check_feature_classmethod(cls, feature: str) -> bool:
-    """Class method to check feature availability."""
-    return get_license_manager().check_feature(feature)
-
-# Add as class method
-LicenseManager.check_feature = classmethod(_check_feature_classmethod)
