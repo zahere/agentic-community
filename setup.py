@@ -42,9 +42,18 @@ setup(
     packages=find_packages(exclude=["tests", "tests.*", "examples", "examples.*"]),
     python_requires=">=3.10, <4",
     install_requires=[
-        # Community edition has minimal dependencies
+        # Core dependencies
         "typing-extensions>=4.9.0",
         "pydantic>=2.0",
+        # LangChain dependencies (required for agents)
+        "langchain-core>=0.2.0",
+        "langchain-community>=0.1.0",
+        "langchain-openai>=0.1.0",
+        "langgraph>=0.4.0",
+        # API dependencies for REST functionality
+        "fastapi>=0.100.0",
+        "uvicorn>=0.23.0",
+        "aiohttp>=3.9.0",
     ],
     extras_require={
         "dev": [
@@ -61,18 +70,6 @@ setup(
             "sphinx>=7.2.0",
             "sphinx-rtd-theme>=2.0.0",
             "myst-parser>=2.0.0",
-        ],
-        # Optional dependencies for advanced features
-        "langchain": [
-            "langchain-core>=0.2.0",
-            "langchain-community>=0.1.0",
-            "langchain-openai>=0.1.0",
-            "langgraph>=0.4.0",
-        ],
-        "api": [
-            "fastapi>=0.100.0",
-            "uvicorn>=0.23.0",
-            "aiohttp>=3.9.0",
         ],
     },
     entry_points={
