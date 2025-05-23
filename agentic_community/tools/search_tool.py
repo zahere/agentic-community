@@ -4,10 +4,21 @@ Copyright (c) 2025 Zaher Khateeb
 Licensed under Apache License 2.0
 """
 
-from agentic_community.core.base import BaseTool
+from typing import Type
+from pydantic import BaseModel, Field
+import requests
+import json
+
+from agentic_community.core.base import BaseTool, ToolConfig
 from agentic_community.core.utils import get_logger
 
 logger = get_logger(__name__)
+
+
+class SearchInput(BaseModel):
+    """Input schema for search tool."""
+    query: str = Field(description="Search query")
+    max_results: int = Field(default=5, description="Maximum results to return")
 
 
 class SearchTool(BaseTool):
@@ -15,13 +26,19 @@ class SearchTool(BaseTool):
     
     def __init__(self):
         """Initialize search tool."""
-        super().__init__(
+        config = ToolConfig(
             name="search",
             description="Search the web for information",
-            keywords=["search", "find", "look for", "query", "lookup"]
+            verbose=True
         )
+        super().__init__(config)
         
-    def run(self, input_text: str) -> str:
+    @property
+    def input_schema(self) -> Type[BaseModel]:
+        """Return input schema."""
+        return SearchInput
+        
+    def execute(self, query: str, max_results: int = 5) -> str:
         """
         Execute a web search.
         
@@ -29,19 +46,20 @@ class SearchTool(BaseTool):
         For real search, users need to implement their own or upgrade to enterprise.
         
         Args:
-            input_text: Search query
+            query: Search query
+            max_results: Maximum results
             
         Returns:
             Search results as string
         """
-        logger.info(f"Searching for: {input_text}")
+        logger.info(f"Searching for: {query}")
         
         # Simulated search for community edition
         # Real implementation would require API keys
         results = [
-            f"Result 1: Information about {input_text}",
-            f"Result 2: Additional details on {input_text}",
-            f"Result 3: Related topics to {input_text}"
+            f"Result 1: Information about {query}",
+            f"Result 2: Additional details on {query}",
+            f"Result 3: Related topics to {query}"
         ]
         
-        return "\n".join(results)
+        return "\n".join(results[:max_results])

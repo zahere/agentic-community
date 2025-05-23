@@ -5,10 +5,10 @@ Copyright (c) 2025 Zaher Khateeb
 Licensed under Apache License 2.0
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 
-from agentic_community.core.utils import get_logger
+from ..utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -21,7 +21,7 @@ class ThoughtStep(BaseModel):
     confidence: float = Field(default=0.8, description="Confidence level")
 
 
-class ReasoningEngine:
+class BasicReasoner:
     """
     Basic reasoning engine for community edition.
     Supports only sequential thinking without reflection.
@@ -29,32 +29,13 @@ class ReasoningEngine:
     
     def __init__(self, max_steps: int = 5):
         """
-        Initialize basic reasoning engine.
+        Initialize basic reasoner.
         
         Args:
             max_steps: Maximum reasoning steps (community limited to 5)
         """
         self.max_steps = min(max_steps, 5)  # Community limit
-        logger.info(f"Initialized ReasoningEngine with max_steps={self.max_steps}")
-        
-    def process(self, task: str) -> str:
-        """
-        Process a task and return reasoning result as string.
-        
-        Args:
-            task: The task to process
-            
-        Returns:
-            String representation of reasoning
-        """
-        result = self.reason(task)
-        
-        # Format steps as string
-        steps_str = []
-        for step in result["steps"]:
-            steps_str.append(f"{step['step_number']}. {step['thought']}")
-            
-        return "\n".join(steps_str)
+        logger.info(f"Initialized BasicReasoner with max_steps={self.max_steps}")
         
     def decompose_task(self, task: str) -> List[ThoughtStep]:
         """
@@ -210,7 +191,7 @@ class ReasoningEngine:
             "task": task,
             "reasoning_type": "sequential",
             "steps": [step.model_dump() for step in steps],
-            "confidence": sum(s.confidence for s in steps) / len(steps) if steps else 0,
+            "confidence": sum(s.confidence for s in steps) / len(steps),
             "limitations": [
                 "No self-reflection capability",
                 "Limited to sequential reasoning",
@@ -219,7 +200,3 @@ class ReasoningEngine:
         }
         
         return results
-
-
-# Keep backward compatibility
-BasicReasoner = ReasoningEngine

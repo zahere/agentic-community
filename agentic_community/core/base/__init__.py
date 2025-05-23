@@ -1,6 +1,6 @@
 """Base module - Shared components between editions."""
 
-from .agent import BaseAgent
-from .tool import BaseTool, ToolConfig
+from .agent import BaseAgent, AgentConfig
+from .tool import BaseTool
 
-__all__ = ["BaseAgent", "BaseTool", "ToolConfig"]
+__all__ = ["BaseAgent", "AgentConfig", "BaseTool"]
