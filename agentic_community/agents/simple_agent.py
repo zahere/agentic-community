@@ -1,17 +1,12 @@
 """
 Simple Agent - Community Edition
-Copyright (c) 2025 Zaher Khateeb
-Licensed under Apache License 2.0
+A lightweight agent implementation without external dependencies.
 """
 
 from typing import Any, Dict, List, Optional
-from langchain_core.language_models import BaseLanguageModel
-from langchain_community.llms import OpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langgraph.graph import StateGraph, END
-
-from agentic_community.core.base import BaseAgent, AgentConfig
+from agentic_community.core.base import BaseAgent
 from agentic_community.core.utils import get_logger
+from agentic_community.core.reasoning import ReasoningEngine
 
 logger = get_logger(__name__)
 
@@ -19,202 +14,208 @@ logger = get_logger(__name__)
 class SimpleAgent(BaseAgent):
     """
     Simple agent with basic sequential reasoning.
-    Community edition agent with limited capabilities.
+    Community edition agent without external dependencies.
     """
     
-    def __init__(self, name: str, openai_api_key: Optional[str] = None):
+    def __init__(self, name: str, tools: Optional[List[Any]] = None):
         """
         Initialize simple agent.
         
         Args:
             name: Agent name
-            openai_api_key: OpenAI API key (required for community edition)
+            tools: List of available tools
         """
-        config = AgentConfig(
-            name=name,
-            description=f"Simple agent: {name}",
-            llm_provider="openai",
-            model="gpt-3.5-turbo"  # Community edition uses basic model
-        )
+        super().__init__(name, tools or [])
+        self.reasoning_engine = ReasoningEngine()
+        logger.info(f"Initialized SimpleAgent '{name}' with {len(self.tools)} tools")
         
-        self.openai_api_key = openai_api_key
-        super().__init__(config)
-        
-        # Initialize the graph
-        self._setup_graph()
-        
-    def _initialize_llm(self) -> BaseLanguageModel:
-        """Initialize OpenAI LLM for community edition."""
-        if not self.openai_api_key:
-            raise ValueError("OpenAI API key required for community edition")
-            
-        return OpenAI(
-            temperature=self.config.temperature,
-            openai_api_key=self.openai_api_key
-        )
-        
-    def _setup_graph(self) -> None:
-        """Setup the simple reasoning graph."""
-        # Define the graph state
-        from typing import TypedDict
-        
-        class GraphState(TypedDict):
-            task: str
-            thoughts: List[str]
-            actions: List[Dict[str, Any]]
-            final_answer: str
-            
-        # Create the graph
-        workflow = StateGraph(GraphState)
-        
-        # Add nodes
-        workflow.add_node("think", self._think_node)
-        workflow.add_node("act", self._act_node)
-        workflow.add_node("summarize", self._summarize_node)
-        
-        # Add edges
-        workflow.set_entry_point("think")
-        workflow.add_edge("think", "act")
-        workflow.add_edge("act", "summarize")
-        workflow.add_edge("summarize", END)
-        
-        # Compile
-        self.graph = workflow.compile()
-        
-    def _think_node(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Basic thinking node - sequential reasoning only."""
-        task = state["task"]
-        
-        # Simple prompt for basic reasoning
-        prompt = ChatPromptTemplate.from_template(
-            "You are a helpful assistant. Break down this task into simple steps:\n"
-            "Task: {task}\n"
-            "Provide 3-5 simple steps to complete this task."
-        )
-        
-        # Get response
-        chain = prompt | self.llm
-        response = chain.invoke({"task": task})
-        
-        # Parse into thoughts
-        thoughts = [step.strip() for step in response.split("\n") if step.strip()]
-        
-        return {"thoughts": thoughts[:5]}  # Limit to 5 steps
-        
-    def _act_node(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Basic action node - execute simple actions."""
-        thoughts = state["thoughts"]
-        actions = []
-        
-        for thought in thoughts:
-            # For community edition, we just simulate actions
-            action = {
-                "thought": thought,
-                "tool": "basic_reasoning",
-                "result": f"Completed: {thought}"
-            }
-            actions.append(action)
-            
-            # Use tools if available
-            if self.tools:
-                # Simple tool execution (limited to 3 tools)
-                for tool in self.tools[:3]:  # Community limit
-                    try:
-                        result = tool.execute(thought)
-                        action["tool_result"] = result
-                    except Exception as e:
-                        logger.error(f"Tool execution failed: {e}")
-                        
-        return {"actions": actions}
-        
-    def _summarize_node(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Summarize the results."""
-        actions = state["actions"]
-        
-        # Create summary
-        summary_parts = []
-        for i, action in enumerate(actions, 1):
-            summary_parts.append(f"{i}. {action['result']}")
-            
-        final_answer = "\n".join(summary_parts)
-        
-        return {"final_answer": final_answer}
-        
-    def think(self, task: str) -> Dict[str, Any]:
+    def execute(self, task: str) -> str:
         """
-        Basic sequential thinking.
-        
-        Args:
-            task: The task to think about
-            
-        Returns:
-            Dictionary containing basic thoughts
-        """
-        initial_state = {
-            "task": task,
-            "thoughts": [],
-            "actions": [],
-            "final_answer": ""
-        }
-        
-        # Run the graph
-        result = self.graph.invoke(initial_state)
-        
-        return {
-            "thoughts": result["thoughts"],
-            "reasoning_type": "sequential",
-            "complexity": "basic"
-        }
-        
-    def act(self, thoughts: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute actions based on thoughts.
-        
-        Args:
-            thoughts: The thoughts from thinking phase
-            
-        Returns:
-            Dictionary containing action results
-        """
-        # In simple agent, this is handled by the graph
-        return {
-            "actions_taken": len(thoughts.get("thoughts", [])),
-            "status": "completed"
-        }
-        
-    def run(self, task: str) -> str:
-        """
-        Run the complete agent workflow.
+        Execute a task using simple sequential reasoning.
         
         Args:
             task: The task to execute
             
         Returns:
-            Final result as string
+            Result of task execution
         """
-        logger.info(f"SimpleAgent {self.config.name} executing task: {task}")
+        logger.info(f"Executing task: {task}")
         
-        # Update state
-        self.update_state({"current_task": task})
+        # Update agent state
+        self.state_manager.update_state("current_task", task)
+        self.state_manager.update_state("status", "thinking")
         
-        # Run through graph
-        initial_state = {
+        # Step 1: Analyze the task
+        analysis = self._analyze_task(task)
+        
+        # Step 2: Plan approach
+        plan = self._plan_approach(analysis)
+        
+        # Step 3: Execute plan
+        result = self._execute_plan(plan, task)
+        
+        # Update history
+        self.state_manager.add_to_history({
             "task": task,
-            "thoughts": [],
-            "actions": [],
-            "final_answer": ""
+            "analysis": analysis,
+            "plan": plan,
+            "result": result,
+            "timestamp": self._get_timestamp()
+        })
+        
+        # Update final state
+        self.state_manager.update_state("status", "completed")
+        
+        return result
+        
+    def _analyze_task(self, task: str) -> Dict[str, Any]:
+        """Analyze the task to understand what needs to be done."""
+        # Use reasoning engine for basic analysis
+        reasoning_result = self.reasoning_engine.process(task)
+        
+        # Identify required tools
+        required_tools = []
+        task_lower = task.lower()
+        
+        for tool in self.tools:
+            # Check if tool might be relevant based on keywords
+            tool_keywords = getattr(tool, 'keywords', [tool.name.lower()])
+            if any(keyword in task_lower for keyword in tool_keywords):
+                required_tools.append(tool.name)
+                
+        analysis = {
+            "task_type": self._identify_task_type(task),
+            "complexity": "simple",  # Community edition handles simple tasks
+            "required_tools": required_tools,
+            "reasoning": reasoning_result
         }
         
-        result = self.graph.invoke(initial_state)
+        logger.debug(f"Task analysis: {analysis}")
+        return analysis
         
-        # Add to history
-        self.state_manager.add_to_history(
-            self.config.name,
-            {
-                "task": task,
-                "result": result["final_answer"],
-                "type": "simple_execution"
-            }
-        )
+    def _identify_task_type(self, task: str) -> str:
+        """Identify the type of task."""
+        task_lower = task.lower()
         
-        return result["final_answer"]
+        if any(word in task_lower for word in ["calculate", "compute", "sum", "multiply"]):
+            return "calculation"
+        elif any(word in task_lower for word in ["search", "find", "look for", "query"]):
+            return "search"
+        elif any(word in task_lower for word in ["analyze", "examine", "inspect"]):
+            return "analysis"
+        elif any(word in task_lower for word in ["summarize", "extract", "shorten"]):
+            return "summarization"
+        else:
+            return "general"
+            
+    def _plan_approach(self, analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Plan the approach based on task analysis."""
+        plan = []
+        task_type = analysis["task_type"]
+        required_tools = analysis["required_tools"]
+        
+        # Create simple sequential plan
+        if task_type == "calculation":
+            plan.append({
+                "step": "extract_numbers",
+                "description": "Extract numbers and operations from the task",
+                "tool": "calculator" if "calculator" in required_tools else None
+            })
+            plan.append({
+                "step": "perform_calculation",
+                "description": "Perform the required calculation",
+                "tool": "calculator" if "calculator" in required_tools else None
+            })
+            
+        elif task_type == "search":
+            plan.append({
+                "step": "formulate_query",
+                "description": "Create search query from task",
+                "tool": "search" if "search" in required_tools else None
+            })
+            plan.append({
+                "step": "execute_search",
+                "description": "Search for information",
+                "tool": "search" if "search" in required_tools else None
+            })
+            
+        elif task_type == "analysis":
+            plan.append({
+                "step": "extract_content",
+                "description": "Extract content to analyze",
+                "tool": "text" if "text" in required_tools else None
+            })
+            plan.append({
+                "step": "analyze_content",
+                "description": "Analyze the content",
+                "tool": "text" if "text" in required_tools else None
+            })
+            
+        else:
+            # Generic plan
+            plan.append({
+                "step": "process_task",
+                "description": "Process the task using available tools",
+                "tool": required_tools[0] if required_tools else None
+            })
+            
+        logger.debug(f"Created plan with {len(plan)} steps")
+        return plan
+        
+    def _execute_plan(self, plan: List[Dict[str, Any]], task: str) -> str:
+        """Execute the plan using available tools."""
+        results = []
+        
+        for step in plan:
+            logger.debug(f"Executing step: {step['step']}")
+            
+            # Try to use specified tool
+            if step["tool"]:
+                tool = self._get_tool(step["tool"])
+                if tool:
+                    try:
+                        result = tool.run(task)
+                        results.append(f"{step['description']}: {result}")
+                        continue
+                    except Exception as e:
+                        logger.error(f"Tool execution failed: {e}")
+                        
+            # Fallback to reasoning engine
+            reasoning_result = self.reasoning_engine.process(
+                f"{step['description']} for task: {task}"
+            )
+            results.append(f"{step['description']}: {reasoning_result}")
+            
+        # Compile results
+        if results:
+            return "\n".join(results)
+        else:
+            return "Task completed but no specific results generated."
+            
+    def _get_tool(self, tool_name: str) -> Optional[Any]:
+        """Get a tool by name."""
+        for tool in self.tools:
+            if tool.name.lower() == tool_name.lower():
+                return tool
+        return None
+        
+    def _get_timestamp(self) -> str:
+        """Get current timestamp."""
+        from datetime import datetime
+        return datetime.now().isoformat()
+        
+    def get_state(self) -> Dict[str, Any]:
+        """Get current agent state."""
+        state = super().get_state()
+        state.update({
+            "agent_type": "simple",
+            "reasoning_type": "sequential",
+            "tool_count": len(self.tools),
+            "history_length": len(self.state_manager.get_history())
+        })
+        return state
+        
+    def reset(self):
+        """Reset agent state."""
+        super().reset()
+        logger.info(f"SimpleAgent '{self.name}' reset complete")
