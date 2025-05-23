@@ -42,12 +42,12 @@ def test_basic_functionality():
         ]
         print("✓ Tools created successfully")
         
-        # Create agent
-        agent = SimpleAgent("TestAgent", tools)
+        # Create agent (with tools parameter)
+        agent = SimpleAgent("TestAgent", tools=tools)
         print("✓ Agent created successfully")
         
         # Test simple task
-        result = agent.execute("Calculate 5 + 3")
+        result = agent.run("Calculate 5 + 3")
         print(f"✓ Agent executed task: {result}")
         
         # Test agent state
@@ -64,15 +64,31 @@ def test_licensing():
     """Test that licensing works correctly for community edition."""
     print("\nTesting licensing...")
     try:
-        from agentic_community.core.licensing.manager import LicenseManager, Feature
+        from agentic_community.core.licensing.manager import get_license_manager
+        
+        # Get license manager instance
+        license_manager = get_license_manager()
+        
+        # Check edition
+        edition = license_manager.get_edition()
+        print(f"✓ Current edition: {edition}")
+        assert edition == "community", "Should be community edition"
         
         # Community edition should have basic features
-        has_basic = LicenseManager.has_feature(Feature.BASIC_AGENTS)
-        print(f"✓ Basic agents available: {has_basic}")
+        has_basic = license_manager.check_feature("basic_reasoning")
+        print(f"✓ Basic reasoning available: {has_basic}")
+        assert has_basic, "Basic reasoning should be available"
         
         # Community edition should NOT have enterprise features
-        has_advanced = LicenseManager.has_feature(Feature.ADVANCED_AGENTS)
-        print(f"✓ Advanced agents restricted: {not has_advanced}")
+        has_advanced = license_manager.check_feature("advanced_reasoning")
+        print(f"✓ Advanced reasoning restricted: {not has_advanced}")
+        assert not has_advanced, "Advanced reasoning should be restricted"
+        
+        # Check limits
+        limits = license_manager.get_limits()
+        print(f"✓ Community limits: max_agents={limits['max_agents']}, max_tools={limits['max_tools']}")
+        assert limits['max_agents'] == 1, "Should be limited to 1 agent"
+        assert limits['max_tools'] == 3, "Should be limited to 3 tools"
         
         return True
     except Exception as e:
