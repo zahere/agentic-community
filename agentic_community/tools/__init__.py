@@ -9,6 +9,7 @@ from .web_scraper import WebScraperTool
 from .email_tool import EmailTool
 from .calendar_tool import CalendarTool
 from .database_tool import DatabaseTool
+from .notification_tool import NotificationTool
 
 __all__ = [
     "SearchTool",
@@ -24,5 +25,6 @@ __all__ = [
     "WebScraperTool",
     "EmailTool",
     "CalendarTool",
-    "DatabaseTool"
+    "DatabaseTool",
+    "NotificationTool"
 ]
