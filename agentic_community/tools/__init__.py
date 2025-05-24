@@ -6,6 +6,9 @@ from .text_tool import TextTool
 from .file_tools import FileReadTool, FileWriteTool, FileDeleteTool, FileListTool
 from .data_tools import CSVTool, JSONTool, DataFrameTool
 from .web_scraper import WebScraperTool
+from .email_tool import EmailTool
+from .calendar_tool import CalendarTool
+from .database_tool import DatabaseTool
 
 __all__ = [
     "SearchTool",
@@ -18,5 +21,8 @@ __all__ = [
     "CSVTool",
     "JSONTool",
     "DataFrameTool",
-    "WebScraperTool"
+    "WebScraperTool",
+    "EmailTool",
+    "CalendarTool",
+    "DatabaseTool"
 ]
